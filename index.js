@@ -65,17 +65,17 @@ io.on('connection', (socket) => {
         io.emit('removeTask', id);
     })
 
-    con.query("SELECT * FROM tasks,users where users.id = tasks.user_id", function(err, result) {
+    con.query("SELECT tasks.id as taskId,users.id as user_id,users.username, tasks.task,tasks.done FROM tasks,users where users.id = tasks.user_id", function(err, result) {
         if (err) {
             console.log(err);
         }
         let tasks = result.map((task) => {
             return {
-                id: task.id,
+                id: task.taskId,
                 task: task.task,
                 done: task.done,
-                user: task.username,
-                user_id: task.user_id
+                user_id: task.user_id,
+                user: task.username
             }
         })
         socket.emit('tasks', tasks);
