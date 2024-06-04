@@ -1,19 +1,32 @@
-import mysql from "mysql";
-import {body, validationResult} from "express-validator";
-import bodyParser from "body-parser";
-import express from "express";
-import bcrypt from "bcrypt";
-import http from "http";
-import {Server} from "socket.io";
+import mysql from 'mysql';
+import { body, validationResult } from 'express-validator';
+import bodyParser from 'body-parser';
+import express from 'express';
+import bcrypt from 'bcrypt';
+import http from 'http';
+import { Server } from 'socket.io';
+import cors from 'cors';
+import jwt from "jsonwebtoken";
+import dotenv from 'dotenv';
+
+const SECRET_KEY = process.env.SECRET_KEY;
 
 var app = express();
 const server = http.createServer(app);
-const io = new Server(server,{
+const io = new Server(server, {
     cors: {
-        allowedHeaders: '*',
-        origin:'*'
+        origin: '*',
+        allowedHeaders: ['Content-Type'],
     }
 });
+
+const corsOptions = {
+    origin: 'http://localhost:5173',
+    optionsSuccessStatus: 200
+};
+
+app.use(cors(corsOptions));
+
 const con = mysql.createConnection({
     host: "localhost",
     user: "root",
@@ -21,40 +34,85 @@ const con = mysql.createConnection({
     database: "todomulti"
 });
 
-io.on('d', (socket) => {
+con.connect(function(err) {
+    if (err) throw err;
+    console.log('Connected to MySQL database');
+});
+
+io.on('connection', (socket) => {
     console.log('a user connected');
+
+    socket.on('disconnect', () => {
+        console.log('user disconnected');
+    });
 });
 
-app.listen(8000, () => {
-    console.log("Server running on port 8000");
-});
-
-app.use(bodyParser.urlencoded({
-    extended: true
-}));
-
+app.use(bodyParser.urlencoded({ extended: true }));
 app.use(bodyParser.json());
 
-app.post("/users",[
+app.post("/users", [
     body('username').trim().isAlphanumeric().escape(),
-    body('email').trim().isAlphanumeric().escape(),
-    body('password').trim().isAlphanumeric().escape(),
-], (req, res, next) => {
-    const { username,email,password } = req.body
+    body('email').isEmail().normalizeEmail(),
+    body('password').trim().isLength({ min: 5 }).escape(),
+], (req, res) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+        return res.status(400).json({ errors: errors.array() });
+    }
 
-    bcrypt.hash(username, 10, (err, hash) => {
+    const { username, email, password } = req.body;
+
+    bcrypt.hash(password, 10, (err, hash) => {
         if (err) {
-            return;
+            return res.status(500).json({ error: 'Internal Server Error' });
         }
-        con.connect(function(err) {
-            if (err) throw err;
-            con.query("INSERT INTO users (username,email,password) VALUES (?,?,?)",[username,email,hash], function (err, result, fields) {
-                if (err) throw err;+
-                res.json(result);
-            });
+
+        con.query("INSERT INTO users (username, email, password) VALUES (?, ?, ?)", [username, email, hash], function(err, result) {
+            if (err) {
+                return res.status(500).json({ error: 'Database Insertion Error' });
+            }
+            res.json({ message: 'User created successfully', result });
         });
     });
-
-
 });
 
+app.post("/login",[
+    body('username').trim().isAlphanumeric().escape(),
+    body('password').trim().isLength({ min: 5 }).escape(),
+], (req,res)=>{
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+        return res.status(400).json({ errors: errors.array() });
+    }
+
+    const { username,  password } = req.body;
+
+    //check in database of username and hashed password is same
+    con.query("SELECT * FROM users WHERE username = ?", [username], function(err, result) {
+        if (err) {
+            return res.status(500).json({ error: 'Database Insertion Error' });
+        }
+        if(result.length === 0){
+            return res.status(404).json({ error: 'User not found' });
+        }
+        bcrypt.compare(password, result[0].password, (err, same) => {
+            if (err) {
+                return res.status(500).json({ error: 'Internal Server Error' });
+            }
+            if (!same) {
+                return res.status(401).json({ error: 'Invalid credentials' });
+            }
+
+            const expireIn = 24 * 60 * 60;
+            console.log(SECRET_KEY)
+            const token    = jwt.sign(null,
+                SECRET_KEY);
+
+            res.json({ token:token  });
+        });
+    });
+})
+
+server.listen(8000, () => {
+    console.log("Server running on port 8000");
+});
