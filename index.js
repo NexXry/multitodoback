@@ -7,7 +7,7 @@ import http from 'http';
 import { Server } from 'socket.io';
 import cors from 'cors';
 import jwt from "jsonwebtoken";
-import dotenv from 'dotenv';
+import 'dotenv/config'
 
 const SECRET_KEY = process.env.SECRET_KEY;
 
@@ -45,6 +45,42 @@ io.on('connection', (socket) => {
     socket.on('disconnect', () => {
         console.log('user disconnected');
     });
+
+    socket.on('foo', (msg) => {
+        con.query("INSERT INTO tasks (task, done, user_id) VALUES (?, ?, ?)", [msg.task, msg.done,msg.user_id], function(err, result) {
+            if (err) {
+                console.log(err);
+            }
+        });
+
+        io.emit('foo', msg);
+    });
+
+    socket.on('removeTask', (id) => {
+        con.query("DELETE FROM tasks WHERE id = ?", [id], function(err, result) {
+            if (err) {
+                console.log(err);
+            }
+        });
+        io.emit('removeTask', id);
+    })
+
+    con.query("SELECT * FROM tasks,users where users.id = tasks.user_id", function(err, result) {
+        if (err) {
+            console.log(err);
+        }
+        let tasks = result.map((task) => {
+            return {
+                id: task.id,
+                task: task.task,
+                done: task.done,
+                user: task.username,
+                user_id: task.user_id
+            }
+        })
+        socket.emit('tasks', tasks);
+    })
+
 });
 
 app.use(bodyParser.urlencoded({ extended: true }));
@@ -104,8 +140,11 @@ app.post("/login",[
             }
 
             const expireIn = 24 * 60 * 60;
-            console.log(SECRET_KEY)
-            const token    = jwt.sign(null,
+
+            const token    = jwt.sign({
+                id: result[0].id,
+                username: result[0].username,
+                },
                 SECRET_KEY);
 
             res.json({ token:token  });
@@ -116,3 +155,4 @@ app.post("/login",[
 server.listen(8000, () => {
     console.log("Server running on port 8000");
 });
+
